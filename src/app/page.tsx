@@ -7,6 +7,8 @@ import { Zap } from 'lucide-react';
 
 export default function HomePage() {
   const authors = ["Iheanacho Daniel", "Alao David", "Alabi Samuel"];
+  // Example filenames for portraits. Make sure these files exist in your /public directory.
+  const portraitImageFilenames = ["iheanacho-daniel.jpg", "alao-david.jpg", "alabi-samuel.jpg"];
   const portraitImageHints = ["developer portrait", "student profile", "coder image"];
 
   return (
@@ -27,10 +29,15 @@ export default function HomePage() {
             This application was developed as part of our project work to facilitate interaction with an automated fish feeder system through IoT. It enables users to monitor and control the feeding operations of the system remotely and efficiently. Communication between the app and the microcontroller is achieved using the MQTT protocol, which ensures low-latency data transfer and real-time responsiveness. The microcontroller, in turn, manages all the mechanical and operational aspects of the feeder.
           </p>
           
+          {/*
+            To use your own images:
+            1. Place your image files (e.g., team-photo.jpg) in the `public` directory at the root of your project.
+            2. Update the `src` prop below to match your filename (e.g., src="/team-photo.jpg").
+          */}
           <div className="w-full px-4">
             <div className="relative w-full rounded-lg overflow-hidden shadow-md aspect-[16/9]">
               <Image
-                src="https://placehold.co/800x450.png"
+                src="/team-photo.jpg" // EXAMPLE: Replace with your actual landscape image file in /public
                 alt="Project Team Outdoors"
                 layout="fill"
                 objectFit="cover"
@@ -47,7 +54,7 @@ export default function HomePage() {
                 <div key={author} className="flex flex-col items-center text-center">
                   <div className="relative w-full max-w-[250px] aspect-[2/3] rounded-lg overflow-hidden shadow-md mb-3">
                     <Image
-                      src={`https://placehold.co/260x390.png`}
+                      src={`/${portraitImageFilenames[index]}`} // EXAMPLE: Replace with your actual portrait image files in /public
                       alt={`Portrait of ${author}`}
                       layout="fill"
                       objectFit="cover"
