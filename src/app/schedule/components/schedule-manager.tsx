@@ -9,38 +9,40 @@ import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Trash2 } from "lucide-react";
 import { useMqtt } from "@/contexts/mqtt-context";
-import { useAuth } from "@/contexts/auth-context"; 
+import { useAuth } from "@/contexts/auth-context";
 
 const LOG_STORAGE_KEY_PREFIX = "aquafeed-logs-client-";
 const SCHEDULE_STORAGE_KEY_PREFIX = "aquafeed-current-schedule-";
 
-
-const TOPIC_TIME = "iot/schedule/time";
-const TOPIC_FREQUENCY = "iot/schedule/frequency";
-const TOPIC_AMOUNT = "iot/schedule/amount";
+const TOPIC_DETAILED_CONFIG = "iot/schedule/detailed_config";
 const TOPIC_ENABLED = "iot/schedule/enabled";
 
 const initialSchedule: ScheduleEntry | null = null;
+
+interface CalculatedFeeding {
+  time: string; // HH:MM
+  amount: string; // X.XXg
+}
 
 export function ScheduleManager() {
   const [currentSchedule, setCurrentSchedule] = useState<ScheduleEntry | null>(initialSchedule);
   const { toast } = useToast();
   const [isPublishing, setIsPublishing] = useState(false);
   const mqttContext = useMqtt();
-  const auth = useAuth(); 
+  const auth = useAuth();
 
-  const sanitizeFirebaseKey = (key: string) => {
+  const sanitizeFirebaseKey = (key: string): string => {
     return key.replace(/[.#$[\]]/g, '_');
   };
 
-  const getScheduleStorageKey = () => {
+  const getScheduleStorageKey = (): string | null => {
     if (auth.user?.email) {
       return `${SCHEDULE_STORAGE_KEY_PREFIX}${sanitizeFirebaseKey(auth.user.email)}`;
     }
     return null;
   };
-  
-  const getClientLogStorageKey = () => {
+
+  const getClientLogStorageKey = (): string | null => {
     if (auth.user?.email) {
       return `${LOG_STORAGE_KEY_PREFIX}${sanitizeFirebaseKey(auth.user.email)}`;
     }
@@ -49,8 +51,8 @@ export function ScheduleManager() {
 
   useEffect(() => {
     if (!auth.user?.email) {
-        setCurrentSchedule(null);
-        return;
+      setCurrentSchedule(null);
+      return;
     }
     const storageKey = getScheduleStorageKey();
     if (!storageKey) return;
@@ -59,18 +61,12 @@ export function ScheduleManager() {
     if (storedSchedule) {
       try {
         const parsedSchedule = JSON.parse(storedSchedule);
-        // Ensure the loaded schedule's ID matches the current user's email
-        if (parsedSchedule &&
-            typeof parsedSchedule === 'object' &&
-            'id' in parsedSchedule &&
-            parsedSchedule.id === auth.user.email && 
-            'time' in parsedSchedule &&
-            'frequency' in parsedSchedule &&
-            'amount' in parsedSchedule &&
-            'enabled' in parsedSchedule) {
+        if (parsedSchedule && typeof parsedSchedule === 'object' &&
+            'id' in parsedSchedule && parsedSchedule.id === auth.user.email &&
+            'time' in parsedSchedule && 'frequency' in parsedSchedule &&
+            'amount' in parsedSchedule && 'enabled' in parsedSchedule) {
           setCurrentSchedule(parsedSchedule as ScheduleEntry);
         } else {
-          // If schedule ID doesn't match or structure is wrong, remove it
           if (parsedSchedule && parsedSchedule.id !== auth.user.email) {
             console.warn(`ScheduleManager: Schedule found in localStorage for ${parsedSchedule.id} but current user is ${auth.user.email}. Clearing.`);
           }
@@ -83,10 +79,10 @@ export function ScheduleManager() {
         setCurrentSchedule(null);
       }
     } else {
-        setCurrentSchedule(null); // No schedule found for this user
+      setCurrentSchedule(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auth.user?.email]); // Re-run when auth.user.email changes
+  }, [auth.user?.email]);
 
   useEffect(() => {
     if (!auth.user?.email) return;
@@ -95,16 +91,14 @@ export function ScheduleManager() {
 
     if (currentSchedule && currentSchedule.id === auth.user.email) {
       localStorage.setItem(storageKey, JSON.stringify(currentSchedule));
-    } else if (!currentSchedule) { 
+    } else if (!currentSchedule) {
       localStorage.removeItem(storageKey);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSchedule, auth.user?.email]); // Re-run when currentSchedule or auth.user.email changes
+  }, [currentSchedule, auth.user?.email]);
 
-
-  const addLogEntry = (logEntryData: Omit<LogEntry, 'id' | 'timestamp'>) => {
-    if (!auth.user?.email) return; 
-    
+  const addLogEntry = (logEntryData: Omit<LogEntry, 'id' | 'timestamp'>): void => {
+    if (!auth.user?.email) return;
     const clientLogStorageKey = getClientLogStorageKey();
     if (!clientLogStorageKey) return;
 
@@ -113,74 +107,82 @@ export function ScheduleManager() {
       ...logEntryData,
       id: crypto.randomUUID(),
       timestamp: new Date(),
-      deviceId: logEntryData.deviceId || sanitizedUserEmail, 
+      deviceId: logEntryData.deviceId || sanitizedUserEmail,
     };
 
     let currentLogs: LogEntry[] = [];
     try {
       const storedLogsRaw = localStorage.getItem(clientLogStorageKey);
       if (storedLogsRaw) {
-        const parsedStoredLogs = JSON.parse(storedLogsRaw);
-        if (Array.isArray(parsedStoredLogs)) {
-          currentLogs = parsedStoredLogs.map((log: any) => {
-            if (log && typeof log === 'object' && log.timestamp && typeof log.id === 'string' && typeof log.status === 'string') {
-              return { ...log, timestamp: new Date(log.timestamp) };
-            }
-            return null;
-          }).filter(log => log !== null) as LogEntry[];
-        }
+        currentLogs = (JSON.parse(storedLogsRaw) as LogEntry[]).map(log => ({ ...log, timestamp: new Date(log.timestamp) }));
       }
-    } catch (e) {
-      console.warn("ScheduleManager: Error parsing logs from localStorage for adding new entry.", e);
-    }
+    } catch (e) { console.warn("ScheduleManager: Error parsing logs for adding new entry.", e); }
 
-    const updatedLogs = [newLog, ...currentLogs];
-    updatedLogs.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-
+    const updatedLogs = [newLog, ...currentLogs].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
     try {
-      localStorage.setItem(clientLogStorageKey, JSON.stringify(updatedLogs.slice(0, 200))); // Keep max 200 logs
+      localStorage.setItem(clientLogStorageKey, JSON.stringify(updatedLogs.slice(0, 200)));
     } catch (storageError) {
       console.error("ScheduleManager: Critical error saving logs to localStorage.", storageError);
-      toast({
-        title: "Error Saving Log",
-        description: "Could not save log to local storage. Storage might be full.",
-        variant: "destructive",
-      });
+      toast({ title: "Error Saving Log", description: "Could not save log. Storage might be full.", variant: "destructive" });
     }
   };
 
-  const publishScheduleComponentToMqtt = async (
-    topic: string,
-    partName: 'time' | 'frequency' | 'amount' | 'enabled',
-    rawValue: string | boolean | number
-  ): Promise<boolean> => {
-    if (!mqttContext || !mqttContext.isConnected || !mqttContext.client) {
+  const calculateDetailedFeedings = (
+    firstMealTime: string, // "HH:MM"
+    totalDailyAmountStr: string, // "15g"
+    frequency: FeedingFrequency
+  ): CalculatedFeeding[] => {
+    const [h, m] = firstMealTime.split(':').map(Number);
+    const firstMealDate = new Date();
+    firstMealDate.setHours(h, m, 0, 0);
+
+    const totalAmountNumeric = parseFloat(totalDailyAmountStr.replace(/g$/i, ''));
+    if (isNaN(totalAmountNumeric) || totalAmountNumeric <= 0) return [];
+
+    let numFeedings = 1;
+    if (frequency === "Twice a day") numFeedings = 2;
+    else if (frequency === "Thrice a day") numFeedings = 3;
+
+    const amountPerFeedingVal = totalAmountNumeric / numFeedings;
+    // Format to ensure at least one decimal place, and up to two if needed.
+    const amountPerFeedingStr = `${parseFloat(amountPerFeedingVal.toFixed(2))}g`;
+
+
+    const feedings: CalculatedFeeding[] = [];
+    if (numFeedings === 0) return [];
+    const intervalHours = 24 / numFeedings;
+
+    for (let i = 0; i < numFeedings; i++) {
+      const currentMealDate = new Date(firstMealDate.getTime());
+      if (i > 0) { // Add interval for subsequent meals
+          currentMealDate.setHours(currentMealDate.getHours() + i * intervalHours);
+      }
+      
+      const hh = String(currentMealDate.getHours()).padStart(2, '0');
+      const mm = String(currentMealDate.getMinutes()).padStart(2, '0');
+      feedings.push({ time: `${hh}:${mm}`, amount: amountPerFeedingStr });
+    }
+    return feedings;
+  };
+
+  const formatDetailedScheduleToString = (feedings: CalculatedFeeding[]): string => {
+    return feedings.map(f => `${f.time},${f.amount}`).join(';');
+  };
+
+  const publishToMqtt = async (topic: string, message: string): Promise<boolean> => {
+     if (!mqttContext || !mqttContext.isConnected || !mqttContext.client) {
       toast({
         title: "MQTT Not Connected",
-        description: `Cannot publish component '${partName}'. MQTT client is not connected.`,
+        description: `Cannot publish to ${topic}. MQTT client is not connected.`,
         variant: "destructive",
         duration: 7000,
       });
-      console.error("ScheduleManager: MQTT not connected, cannot publish component:", partName);
+      console.error(`ScheduleManager: MQTT not connected, cannot publish to ${topic}.`);
       if (mqttContext && mqttContext.error) console.error("ScheduleManager: MQTT Connection Error:", mqttContext.error);
       return false;
     }
-
-    const accountId = auth.user?.email || "unknown_user_schedule_publish";
-    
-    const message: string = String(rawValue); 
-    
-    console.log(`ScheduleManager: Publishing PLAIN TEXT to MQTT. Topic: [${topic}], Part: [${partName}], Value: ["${message}"]. Intended for account (raw): ${accountId}`);
-
-    const success = await mqttContext.publish(topic, message, { qos: 1, retain: true });
-
-    if (success) {
-      console.log(`ScheduleManager: Successfully published PLAIN TEXT for ${partName} ("${message}") to MQTT topic ${topic}.`);
-    } else {
-      console.error(`ScheduleManager: Failed to publish PLAIN TEXT for ${partName} to MQTT topic ${topic}.`);
-      toast({ title: "MQTT Publish Error", description: `Sending ${partName} to ${topic} failed.`, variant: "destructive" });
-    }
-    return success;
+    console.log(`ScheduleManager: Publishing to MQTT. Topic: [${topic}], Message: ["${message}"].`);
+    return await mqttContext.publish(topic, message, { qos: 1, retain: true });
   };
 
 
@@ -195,148 +197,155 @@ export function ScheduleManager() {
     const isUpdating = !!currentSchedule && currentSchedule.id === auth.user.email;
     const newEnabledState = scheduleData.enabled !== undefined
       ? scheduleData.enabled
-      : (isUpdating ? currentSchedule!.enabled : true);
+      : (isUpdating ? currentSchedule!.enabled : true); // Default to enabled for new schedules
 
-    const newSchedule: ScheduleEntry = {
+    const newScheduleBasis: ScheduleEntry = {
       ...scheduleData,
-      id: auth.user.email, 
+      id: auth.user.email,
       enabled: newEnabledState,
     };
-    
-    setCurrentSchedule(newSchedule); 
+
+    setCurrentSchedule(newScheduleBasis);
     addLogEntry({
       status: isUpdating ? "Schedule Updated" : "Schedule Set",
-      scheduleDetails: { ...newSchedule },
+      scheduleDetails: { ...newScheduleBasis },
       deviceId: sanitizedUserEmail,
     });
     toast({
       title: isUpdating ? "Schedule Updated Locally" : "Schedule Set Locally",
-      description: `Config for ${newSchedule.time} is now ${newSchedule.enabled ? 'active' : 'inactive'}. Publishing components...`,
+      description: `Config for ${newScheduleBasis.time} (first meal), total ${newScheduleBasis.amount}/day, freq: ${newScheduleBasis.frequency}. Publishing...`,
     });
-    
-    const publishOperations = [
-      { topic: TOPIC_TIME, part: 'time' as const, value: newSchedule.time },
-      { topic: TOPIC_FREQUENCY, part: 'frequency' as const, value: newSchedule.frequency },
-      { topic: TOPIC_AMOUNT, part: 'amount' as const, value: newSchedule.amount },
-      { topic: TOPIC_ENABLED, part: 'enabled' as const, value: newSchedule.enabled },
-    ];
+
+    const detailedFeedings = calculateDetailedFeedings(newScheduleBasis.time, newScheduleBasis.amount, newScheduleBasis.frequency);
+    const detailedConfigString = formatDetailedScheduleToString(detailedFeedings);
 
     let allPublishedSuccessfully = true;
-    for (const op of publishOperations) {
-      const success = await publishScheduleComponentToMqtt(op.topic, op.part, op.value);
-      if (!success) {
-        allPublishedSuccessfully = false;
-      }
+    const publishedEnabled = await publishToMqtt(TOPIC_ENABLED, String(newScheduleBasis.enabled));
+    if (!publishedEnabled) allPublishedSuccessfully = false;
+
+    // Only publish detailed config if the schedule is enabled
+    if (newScheduleBasis.enabled) {
+      const publishedDetailedConfig = await publishToMqtt(TOPIC_DETAILED_CONFIG, detailedConfigString);
+      if (!publishedDetailedConfig) allPublishedSuccessfully = false;
+    } else {
+      // If schedule is being set to disabled, we might want to publish an empty detailed config or specific "disabled" signal
+      // For now, let's assume not publishing detailed_config when enabled is false is sufficient if device checks enabled status first.
+      // Alternatively, publish an empty string or a special marker if the device expects something on TOPIC_DETAILED_CONFIG.
+      // Let's publish an empty string to clear any previous detailed config on the device if it's disabled.
+      const publishedEmptyDetailedConfig = await publishToMqtt(TOPIC_DETAILED_CONFIG, "");
+       if (!publishedEmptyDetailedConfig) allPublishedSuccessfully = false;
+       console.log("ScheduleManager: Schedule is disabled, published empty string to TOPIC_DETAILED_CONFIG.");
     }
 
-    // Single log entry for the entire "Device Sync: Config Sent" operation
+
     addLogEntry({
-        status: 'Device Sync: Config Sent',
-        scheduleDetails: { ...newSchedule },
-        deviceId: sanitizedUserEmail,
-        notes: allPublishedSuccessfully ? "All schedule components published." : "Attempted to publish schedule components; some may have failed."
+      status: 'Device Sync: Config Sent',
+      scheduleDetails: { ...newScheduleBasis },
+      deviceId: sanitizedUserEmail,
+      notes: `Enabled: ${newScheduleBasis.enabled}. Detailed: ${newScheduleBasis.enabled ? detailedConfigString : '(not sent as schedule is disabled, empty string sent)'}. Pub Success: ${allPublishedSuccessfully}.`
     });
 
     if (allPublishedSuccessfully) {
-        toast({
-            title: "Schedule Components Published",
-            description: "All schedule components sent as plain text via MQTT.",
-            variant: "default"
-        });
+      toast({ title: "Schedule Sync Attempted", description: "Schedule configuration and enabled status sent via MQTT.", variant: "default" });
     } else {
-        toast({
-            title: "Partial Component Publish",
-            description: "Some schedule components failed to publish. Check logs for details.",
-            variant: "destructive"
-        });
+      toast({ title: "Partial Schedule Sync", description: "Some schedule parts failed to publish. Check logs.", variant: "destructive" });
     }
     setIsPublishing(false);
   };
 
   const toggleSchedule = async (scheduleId: string) => {
-    if (!auth.user?.email) {
-      toast({ title: "Authentication Error", description: "You must be logged in to toggle a schedule.", variant: "destructive" });
+    if (!auth.user?.email || !currentSchedule || currentSchedule.id !== scheduleId || currentSchedule.id !== auth.user.email) {
+      toast({ title: "Error", description: "Cannot toggle schedule. Ensure you are logged in and the schedule is current.", variant: "destructive" });
       return;
     }
-    if (currentSchedule && currentSchedule.id === scheduleId && currentSchedule.id === auth.user.email) {
-      setIsPublishing(true);
-      const updatedSchedule = { ...currentSchedule, enabled: !currentSchedule.enabled };
-      const sanitizedUserEmail = sanitizeFirebaseKey(auth.user.email);
-      
-      setCurrentSchedule(updatedSchedule);
-      addLogEntry({
-        status: "Schedule Updated",
-        scheduleDetails: { ...updatedSchedule },
-        deviceId: sanitizedUserEmail,
-      });
-      toast({
-        title: `Schedule ${updatedSchedule.enabled ? 'Enabled' : 'Disabled'} Locally`,
-        description: `Publishing 'enabled' state (${updatedSchedule.enabled.toString()}) as plain text via MQTT...`
-      });
 
-      const success = await publishScheduleComponentToMqtt(TOPIC_ENABLED, 'enabled', updatedSchedule.enabled);
-      
-      addLogEntry({
-        status: 'Device Sync: Config Sent',
-        scheduleDetails: { ...updatedSchedule }, 
-        deviceId: sanitizedUserEmail,
-        notes: success 
-          ? `Published enabled: ${updatedSchedule.enabled} (plain text) to ${TOPIC_ENABLED}.`
-          : `Failed to publish enabled: ${updatedSchedule.enabled} to ${TOPIC_ENABLED}.`
-      });
+    setIsPublishing(true);
+    const updatedSchedule = { ...currentSchedule, enabled: !currentSchedule.enabled };
+    const sanitizedUserEmail = sanitizeFirebaseKey(auth.user.email);
 
-      if (success) {
-          toast({
-              title: "Enabled State Published",
-              description: `Schedule 'enabled: ${updatedSchedule.enabled.toString()}' (plain text) sent to ${TOPIC_ENABLED}.`,
-              variant: "default"
-          });
-      }
-      setIsPublishing(false);
+    setCurrentSchedule(updatedSchedule);
+    addLogEntry({
+      status: "Schedule Updated",
+      scheduleDetails: { ...updatedSchedule },
+      deviceId: sanitizedUserEmail,
+    });
+    toast({
+      title: `Schedule ${updatedSchedule.enabled ? 'Enabled' : 'Disabled'} Locally`,
+      description: `Publishing 'enabled' state (${updatedSchedule.enabled}) and detailed config via MQTT...`
+    });
+
+    const detailedFeedings = calculateDetailedFeedings(updatedSchedule.time, updatedSchedule.amount, updatedSchedule.frequency);
+    const detailedConfigString = formatDetailedScheduleToString(detailedFeedings);
+
+    let allPublishedSuccessfully = true;
+    const publishedEnabled = await publishToMqtt(TOPIC_ENABLED, String(updatedSchedule.enabled));
+    if (!publishedEnabled) allPublishedSuccessfully = false;
+
+    if (updatedSchedule.enabled) {
+        const publishedDetailedConfig = await publishToMqtt(TOPIC_DETAILED_CONFIG, detailedConfigString);
+        if (!publishedDetailedConfig) allPublishedSuccessfully = false;
+    } else {
+        // Publish empty string to detailed config topic if schedule is disabled
+        const publishedEmptyDetailedConfig = await publishToMqtt(TOPIC_DETAILED_CONFIG, "");
+        if (!publishedEmptyDetailedConfig) allPublishedSuccessfully = false;
+        console.log("ScheduleManager: Schedule toggled to disabled, published empty string to TOPIC_DETAILED_CONFIG.");
     }
+
+
+    addLogEntry({
+      status: 'Device Sync: Config Sent',
+      scheduleDetails: { ...updatedSchedule },
+      deviceId: sanitizedUserEmail,
+      notes: `Toggled Enabled: ${updatedSchedule.enabled}. Detailed: ${updatedSchedule.enabled ? detailedConfigString : '(not sent as schedule is disabled, empty string sent)'}. Pub Success: ${allPublishedSuccessfully}.`
+    });
+
+    if (allPublishedSuccessfully) {
+      toast({ title: "Schedule State Synced", description: `Enabled: ${updatedSchedule.enabled} and detailed config sent.`, variant: "default" });
+    } else {
+      toast({ title: "Partial State Sync", description: "Failed to sync some schedule parts. Check logs.", variant: "destructive" });
+    }
+    setIsPublishing(false);
   };
 
   const deleteSchedule = async (scheduleId: string) => {
-    if (!auth.user?.email) {
-      toast({ title: "Authentication Error", description: "You must be logged in to delete a schedule.", variant: "destructive" });
+    if (!auth.user?.email || !currentSchedule || currentSchedule.id !== scheduleId || currentSchedule.id !== auth.user.email) {
+      toast({ title: "Error", description: "Cannot clear schedule. Ensure you are logged in and the schedule is current.", variant: "destructive" });
       return;
     }
-    if (currentSchedule && currentSchedule.id === scheduleId && currentSchedule.id === auth.user.email) {
-      setIsPublishing(true);
-      const scheduleBeingCleared = { ...currentSchedule }; 
-      const sanitizedUserEmail = sanitizeFirebaseKey(auth.user.email);
+    setIsPublishing(true);
+    const scheduleBeingCleared = { ...currentSchedule };
+    const sanitizedUserEmail = sanitizeFirebaseKey(auth.user.email);
 
-      toast({ title: "Clearing Schedule...", description: "Publishing 'enabled: false' (plain text) then clearing locally." });
+    toast({ title: "Clearing Schedule...", description: "Publishing 'enabled: false' and empty detailed config, then clearing locally." });
 
-      const publishDisabledSuccess = await publishScheduleComponentToMqtt(TOPIC_ENABLED, 'enabled', false);
-      
-      addLogEntry({
-        status: 'Device Sync: Config Sent',
-        scheduleDetails: { ...scheduleBeingCleared, enabled: false }, // Log what was attempted to be sent
-        deviceId: sanitizedUserEmail,
-        notes: publishDisabledSuccess 
-          ? `Published enabled: false (plain text) to ${TOPIC_ENABLED} to clear schedule.`
-          : `Failed to publish enabled: false to ${TOPIC_ENABLED} to clear schedule.`
-      });
-      
-      if (publishDisabledSuccess) {
-        toast({ title: "Clear Signal Published", description: `Published 'enabled: false' (plain text) to ${TOPIC_ENABLED}.` });
-      } else {
-        toast({ title: "Failed to Publish Clear Signal", description: `Could not send 'enabled: false'. Clearing locally.`, variant: "destructive" });
-      }
-      
-      setCurrentSchedule(null); 
-      addLogEntry({
-        status: "Schedule Cleared",
-        scheduleDetails: { ...scheduleBeingCleared }, 
-        deviceId: sanitizedUserEmail,
-      });
-      toast({
-        title: "Schedule Cleared Locally",
-        description: `Active schedule for ${auth.user.email} cleared.`,
-      });
-      setIsPublishing(false);
+    let allPublishedSuccessfully = true;
+    const publishedEnabledFalse = await publishToMqtt(TOPIC_ENABLED, "false");
+    if (!publishedEnabledFalse) allPublishedSuccessfully = false;
+
+    const publishedEmptyDetailedConfig = await publishToMqtt(TOPIC_DETAILED_CONFIG, "");
+    if (!publishedEmptyDetailedConfig) allPublishedSuccessfully = false;
+
+
+    setCurrentSchedule(null); // Clear local schedule first
+    addLogEntry({
+      status: "Schedule Cleared",
+      scheduleDetails: { ...scheduleBeingCleared },
+      deviceId: sanitizedUserEmail,
+    });
+     addLogEntry({ // Log the sync attempt after local clear
+      status: 'Device Sync: Config Sent',
+      scheduleDetails: { ...scheduleBeingCleared, enabled: false },
+      deviceId: sanitizedUserEmail,
+      notes: `Cleared schedule. Sent Enabled: false. Sent Detailed: (empty string). Pub Success: ${allPublishedSuccessfully}.`
+    });
+
+
+    if (allPublishedSuccessfully) {
+      toast({ title: "Schedule Clear Synced", description: "Disabled signal and empty detailed config sent to device.", variant: "default" });
+    } else {
+      toast({ title: "Failed to Fully Sync Clear", description: "Could not send all clear signals. Cleared locally.", variant: "destructive" });
     }
+    setIsPublishing(false);
   };
 
   return (

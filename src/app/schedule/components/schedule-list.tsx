@@ -5,7 +5,7 @@ import type { ScheduleEntry } from "@/lib/types";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Clock3, Repeat, CheckCircle, XCircle } from "lucide-react"; 
+import { Clock3, Repeat, CheckCircle, XCircle, Package } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 interface ScheduleListProps {
@@ -31,18 +31,20 @@ export function ScheduleList({ currentSchedule, onToggleSchedule }: ScheduleList
       <CardHeader>
         <CardTitle className="font-headline text-xl flex items-center gap-2 text-primary">
             {currentSchedule.enabled ? <CheckCircle className="h-6 w-6 text-green-600" /> : <XCircle className="h-6 w-6 text-red-600" />}
-            Active Schedule
+            Active Schedule Overview
         </CardTitle>
-        <CardDescription>View and manage your active feeding schedule. Previous schedule configurations are moved to the log upon update.</CardDescription>
+        <CardDescription>
+          View your primary schedule settings. The system calculates and sends detailed feeding times/amounts to the device.
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[150px]">Time for first meal</TableHead>
+                <TableHead className="w-[150px]"><Clock3 className="inline h-4 w-4 mr-1"/>Time for first meal</TableHead>
                 <TableHead><Repeat className="inline h-4 w-4 mr-1"/>Frequency</TableHead>
-                <TableHead>Amount (grams)</TableHead>
+                <TableHead><Package className="inline h-4 w-4 mr-1"/>Total Daily Amount</TableHead>
                 <TableHead className="text-center">Enabled</TableHead>
               </TableRow>
             </TableHeader>

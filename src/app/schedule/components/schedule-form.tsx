@@ -19,13 +19,13 @@ interface ScheduleFormProps {
 const frequencies: FeedingFrequency[] = ["Once a day", "Twice a day", "Thrice a day"];
 
 const defaultTime = "08:00";
-const defaultAmountNumber = "5"; // Store as string for input, will append 'g' on save
+const defaultAmountNumber = "15"; // Default total daily amount
 const defaultFrequency: FeedingFrequency = "Once a day";
 
 export function ScheduleForm({ currentSchedule, onSaveSchedule }: ScheduleFormProps) {
   const { toast } = useToast();
-  const [time, setTime] = useState(defaultTime);
-  const [amount, setAmount] = useState(defaultAmountNumber); // Input field will store just the number
+  const [time, setTime] = useState(defaultTime); // Time for first meal
+  const [amount, setAmount] = useState(defaultAmountNumber); // Total daily amount
   const [frequency, setFrequency] = useState<FeedingFrequency>(defaultFrequency);
 
   const formTitle = currentSchedule ? "Update Active Schedule" : "Set Active Schedule";
@@ -35,8 +35,7 @@ export function ScheduleForm({ currentSchedule, onSaveSchedule }: ScheduleFormPr
   useEffect(() => {
     if (currentSchedule) {
       setTime(currentSchedule.time);
-      // Remove 'g' for display in input, if present
-      setAmount(currentSchedule.amount.replace(/g$/i, ''));
+      setAmount(currentSchedule.amount.replace(/g$/i, '')); // Store as number string for input
       setFrequency(currentSchedule.frequency);
     } else {
       setTime(defaultTime);
@@ -50,7 +49,7 @@ export function ScheduleForm({ currentSchedule, onSaveSchedule }: ScheduleFormPr
     if (!time || !frequency || !amount) {
       toast({
         title: "Missing Information",
-        description: "Please fill in time, select frequency, and specify amount.",
+        description: "Please fill in time, select frequency, and specify total daily amount.",
         variant: "destructive",
       });
       return;
@@ -60,16 +59,17 @@ export function ScheduleForm({ currentSchedule, onSaveSchedule }: ScheduleFormPr
     if (isNaN(numericAmount) || numericAmount <= 0) {
       toast({
         title: "Invalid Amount",
-        description: "Food amount must be a positive number.",
+        description: "Total daily food amount must be a positive number.",
         variant: "destructive",
       });
       return;
     }
 
+    // ScheduleDataToSave now represents the primary settings: first meal time, total daily amount, frequency
     const scheduleDataToSave: Omit<ScheduleEntry, 'id' | 'enabled'> & { enabled?: boolean } = {
       time,
       frequency,
-      amount: `${numericAmount}g`, // Append 'g' before saving
+      amount: `${numericAmount}g`, // Append 'g' for total daily amount
     };
     if (currentSchedule) {
         scheduleDataToSave.enabled = currentSchedule.enabled;
@@ -82,11 +82,13 @@ export function ScheduleForm({ currentSchedule, onSaveSchedule }: ScheduleFormPr
     <Card className="mb-6 border-primary/50 shadow-md">
       <CardHeader>
         <CardTitle className="font-headline text-xl flex items-center gap-2 text-primary">
-          <Settings className="h-6 w-6" /> 
+          <Settings className="h-6 w-6" />
           {formTitle}
         </CardTitle>
         <CardDescription>
           {currentSchedule ? "Modify the active feeding schedule." : "Configure the active feeding schedule for your fish."}
+          <br />
+          The system will automatically calculate individual feeding times and amounts based on the frequency.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -117,19 +119,19 @@ export function ScheduleForm({ currentSchedule, onSaveSchedule }: ScheduleFormPr
               </Select>
             </div>
             <div>
-              <Label htmlFor="amount" className="font-medium">Food Amount (grams)</Label>
+              <Label htmlFor="amount" className="font-medium">Total Daily Food Amount (grams)</Label>
               <Input
                 id="amount"
-                type="text" // Keep as text to allow flexible input, parse to number later
+                type="text"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                placeholder="e.g., 5"
+                placeholder="e.g., 15"
                 className="mt-1"
                 required
               />
             </div>
           </div>
-          
+
           <div className="flex flex-col md:flex-row gap-2">
             <Button type="submit" className="w-full md:w-auto bg-primary hover:bg-primary/90 text-primary-foreground">
               {buttonIcon}
