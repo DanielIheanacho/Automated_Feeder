@@ -59,16 +59,21 @@ export function ScheduleManager() {
     if (storedSchedule) {
       try {
         const parsedSchedule = JSON.parse(storedSchedule);
+        // Ensure the loaded schedule's ID matches the current user's email
         if (parsedSchedule &&
             typeof parsedSchedule === 'object' &&
             'id' in parsedSchedule &&
-            parsedSchedule.id === auth.user.email && // Ensure it's for the current user
+            parsedSchedule.id === auth.user.email && 
             'time' in parsedSchedule &&
             'frequency' in parsedSchedule &&
             'amount' in parsedSchedule &&
             'enabled' in parsedSchedule) {
           setCurrentSchedule(parsedSchedule as ScheduleEntry);
         } else {
+          // If schedule ID doesn't match or structure is wrong, remove it
+          if (parsedSchedule && parsedSchedule.id !== auth.user.email) {
+            console.warn(`ScheduleManager: Schedule found in localStorage for ${parsedSchedule.id} but current user is ${auth.user.email}. Clearing.`);
+          }
           localStorage.removeItem(storageKey);
           setCurrentSchedule(null);
         }
@@ -80,7 +85,8 @@ export function ScheduleManager() {
     } else {
         setCurrentSchedule(null); // No schedule found for this user
     }
-  }, [auth.user?.email]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auth.user?.email]); // Re-run when auth.user.email changes
 
   useEffect(() => {
     if (!auth.user?.email) return;
@@ -89,13 +95,15 @@ export function ScheduleManager() {
 
     if (currentSchedule && currentSchedule.id === auth.user.email) {
       localStorage.setItem(storageKey, JSON.stringify(currentSchedule));
-    } else if (!currentSchedule) { // If currentSchedule becomes null (e.g. cleared)
+    } else if (!currentSchedule) { 
       localStorage.removeItem(storageKey);
     }
-  }, [currentSchedule, auth.user?.email]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentSchedule, auth.user?.email]); // Re-run when currentSchedule or auth.user.email changes
+
 
   const addLogEntry = (logEntryData: Omit<LogEntry, 'id' | 'timestamp'>) => {
-    if (!auth.user?.email) return; // Don't log if no user
+    if (!auth.user?.email) return; 
     
     const clientLogStorageKey = getClientLogStorageKey();
     if (!clientLogStorageKey) return;
@@ -130,7 +138,7 @@ export function ScheduleManager() {
     updatedLogs.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
 
     try {
-      localStorage.setItem(clientLogStorageKey, JSON.stringify(updatedLogs));
+      localStorage.setItem(clientLogStorageKey, JSON.stringify(updatedLogs.slice(0, 200))); // Keep max 200 logs
     } catch (storageError) {
       console.error("ScheduleManager: Critical error saving logs to localStorage.", storageError);
       toast({
@@ -159,40 +167,15 @@ export function ScheduleManager() {
     }
 
     const accountId = auth.user?.email || "unknown_user_schedule_publish";
-    const sanitizedAccountId = sanitizeFirebaseKey(accountId);
     
-    const message: string = String(rawValue); // Ensure plain text
+    const message: string = String(rawValue); 
     
-    console.log(`ScheduleManager: Publishing PLAIN TEXT to MQTT. Topic: [${topic}], Part: [${partName}], Value: ["${message}"]. Intended for account (raw): ${accountId}, (sanitized for RTDB): ${sanitizedAccountId}`);
-
-    // For plain text, the `targetDeviceId` is not sent in the payload itself.
-    // The association to the user for RTDB logging on the Cloud Function side (if it were to process plain text)
-    // would need to be inferred or handled differently.
-    // For now, this function is primarily about sending the plain value to the device.
-    // The device (ESP32) needs to know how to interpret this plain text.
-    // If the device needs to ACK back to a specific user, it would need to receive the user's ID
-    // perhaps through a JSON command earlier, or the universal topics are implicitly for one user per device.
+    console.log(`ScheduleManager: Publishing PLAIN TEXT to MQTT. Topic: [${topic}], Part: [${partName}], Value: ["${message}"]. Intended for account (raw): ${accountId}`);
 
     const success = await mqttContext.publish(topic, message, { qos: 1, retain: true });
 
     if (success) {
       console.log(`ScheduleManager: Successfully published PLAIN TEXT for ${partName} ("${message}") to MQTT topic ${topic}.`);
-      
-      const scheduleDetailsForLog = currentSchedule 
-        ? { ...currentSchedule, enabled: partName === 'enabled' ? (rawValue as boolean) : currentSchedule.enabled } 
-        : { time: "", frequency: "" as FeedingFrequency, amount: "", enabled: false};
-
-      if (partName === 'time') scheduleDetailsForLog.time = rawValue as string;
-      else if (partName === 'frequency') scheduleDetailsForLog.frequency = rawValue as FeedingFrequency;
-      else if (partName === 'amount') scheduleDetailsForLog.amount = rawValue as string;
-      else if (partName === 'enabled') scheduleDetailsForLog.enabled = rawValue as boolean;
-      
-      addLogEntry({
-        status: 'Device Sync: Config Sent',
-        scheduleDetails: scheduleDetailsForLog,
-        deviceId: sanitizedAccountId, 
-        notes: `Published ${partName}: "${message}" (plain text) to ${topic}`
-      });
     } else {
       console.error(`ScheduleManager: Failed to publish PLAIN TEXT for ${partName} to MQTT topic ${topic}.`);
       toast({ title: "MQTT Publish Error", description: `Sending ${partName} to ${topic} failed.`, variant: "destructive" });
@@ -216,7 +199,7 @@ export function ScheduleManager() {
 
     const newSchedule: ScheduleEntry = {
       ...scheduleData,
-      id: auth.user.email, // Use raw user email as schedule ID locally
+      id: auth.user.email, 
       enabled: newEnabledState,
     };
     
@@ -246,16 +229,24 @@ export function ScheduleManager() {
       }
     }
 
+    // Single log entry for the entire "Device Sync: Config Sent" operation
+    addLogEntry({
+        status: 'Device Sync: Config Sent',
+        scheduleDetails: { ...newSchedule },
+        deviceId: sanitizedUserEmail,
+        notes: allPublishedSuccessfully ? "All schedule components published." : "Attempted to publish schedule components; some may have failed."
+    });
+
     if (allPublishedSuccessfully) {
         toast({
             title: "Schedule Components Published",
-            description: "Schedule components sent as plain text via MQTT.",
+            description: "All schedule components sent as plain text via MQTT.",
             variant: "default"
         });
     } else {
         toast({
             title: "Partial Component Publish",
-            description: "Some schedule components failed to publish. Check logs.",
+            description: "Some schedule components failed to publish. Check logs for details.",
             variant: "destructive"
         });
     }
@@ -284,6 +275,15 @@ export function ScheduleManager() {
       });
 
       const success = await publishScheduleComponentToMqtt(TOPIC_ENABLED, 'enabled', updatedSchedule.enabled);
+      
+      addLogEntry({
+        status: 'Device Sync: Config Sent',
+        scheduleDetails: { ...updatedSchedule }, 
+        deviceId: sanitizedUserEmail,
+        notes: success 
+          ? `Published enabled: ${updatedSchedule.enabled} (plain text) to ${TOPIC_ENABLED}.`
+          : `Failed to publish enabled: ${updatedSchedule.enabled} to ${TOPIC_ENABLED}.`
+      });
 
       if (success) {
           toast({
@@ -309,6 +309,15 @@ export function ScheduleManager() {
       toast({ title: "Clearing Schedule...", description: "Publishing 'enabled: false' (plain text) then clearing locally." });
 
       const publishDisabledSuccess = await publishScheduleComponentToMqtt(TOPIC_ENABLED, 'enabled', false);
+      
+      addLogEntry({
+        status: 'Device Sync: Config Sent',
+        scheduleDetails: { ...scheduleBeingCleared, enabled: false }, // Log what was attempted to be sent
+        deviceId: sanitizedUserEmail,
+        notes: publishDisabledSuccess 
+          ? `Published enabled: false (plain text) to ${TOPIC_ENABLED} to clear schedule.`
+          : `Failed to publish enabled: false to ${TOPIC_ENABLED} to clear schedule.`
+      });
       
       if (publishDisabledSuccess) {
         toast({ title: "Clear Signal Published", description: `Published 'enabled: false' (plain text) to ${TOPIC_ENABLED}.` });
