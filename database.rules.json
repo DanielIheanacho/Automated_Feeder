@@ -1,0 +1,28 @@
+
+{
+  "rules": {
+    "mqtt": {
+      ".read": "auth != null", // Or true for public access during development
+      ".write": false, // Only Functions should write here
+      "$topic": {
+        "$timestamp": {
+          // Allow functions to write validated data
+          ".write": "!data.exists() && newData.exists()", // Allow create, prevent update/delete by rule
+          ".validate": "newData.hasChildren(['deviceId', 'timestamp', 'receivedAt', 'topic']) && newData.child('receivedAt').isNumber() && newData.child('timestamp').isNumber()"
+        }
+      }
+    },
+    "commands": {
+      ".read": "auth != null",
+      "$deviceId": {
+        "$pushId": {
+          ".write": "auth != null",
+          ".validate": "newData.hasChildren(['command']) && newData.child('command').isString()"
+        }
+      }
+    },
+    // Default rules for other paths
+    ".read": false,
+    ".write": false
+  }
+}
