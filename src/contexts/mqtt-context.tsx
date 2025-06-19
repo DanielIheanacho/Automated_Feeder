@@ -30,7 +30,7 @@ export const MqttProvider = ({ children }: { children: ReactNode }) => {
     console.log("MqttProvider: useEffect triggered. Attempting to initialize and connect to broker.");
 
     const options: IClientOptions = {
-      clientId: MQTT_CLIENT_ID,
+      clientId: `${MQTT_CLIENT_ID}-${Math.random().toString(16).substring(2, 10)}`, // Ensure unique client ID
       username: MQTT_USERNAME,
       password: MQTT_PASSWORD,
       reconnectPeriod: 4000, // Reconnect after 4 seconds
@@ -52,7 +52,7 @@ export const MqttProvider = ({ children }: { children: ReactNode }) => {
       console.log('MqttProvider: Connected to broker! connack:', connack);
       setIsConnected(true);
       setError(null);
-      toast({ title: "MQTT Connected", description: "Successfully connected to the MQTT broker.", variant: "default" });
+      toast({ title: "MQTT Connected", description: "Successfully connected to the MQTT broker.", variant: "default", duration: 3000 });
     });
 
     mqttClientInstance.on('reconnect', () => {
@@ -71,7 +71,7 @@ export const MqttProvider = ({ children }: { children: ReactNode }) => {
       console.warn('MqttProvider: Client is offline.');
       setIsConnected(false);
       setError("MQTT client is offline.");
-      toast({ title: "MQTT Offline", description: "MQTT client went offline.", variant: "destructive" });
+      toast({ title: "MQTT Offline", description: "MQTT client went offline.", variant: "destructive", duration: 3000 });
     });
 
     mqttClientInstance.on('error', (err) => {
@@ -79,13 +79,17 @@ export const MqttProvider = ({ children }: { children: ReactNode }) => {
       setIsConnected(false);
       setError(err.message);
       if (!mqttClientInstance.reconnecting) {
-         toast({ title: "MQTT Error", description: `Connection error: ${err.message}`, variant: "destructive" });
+         toast({ title: "MQTT Error", description: `Connection error: ${err.message}`, variant: "destructive", duration: 5000 });
       }
     });
 
     mqttClientInstance.on('message', (topic, payloadBuffer) => {
       const payload = payloadBuffer.toString();
       console.log(`MqttProvider: Received message on topic ${topic}: ${payload}`);
+      // Example: Display a toast for certain incoming messages if desired
+      // if (topic === "iot/status/feeder01") {
+      //   toast({ title: "Device Status Update", description: `Feeder01: ${payload}`, duration: 3000});
+      // }
     });
 
     return () => {
@@ -98,7 +102,7 @@ export const MqttProvider = ({ children }: { children: ReactNode }) => {
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // Empty array ensures this runs once on mount and unmount
 
   const publish = useCallback(async (topic: string, message: string | Buffer, options?: IClientPublishOptions): Promise<boolean> => {
     if (!client || !isConnected) {
