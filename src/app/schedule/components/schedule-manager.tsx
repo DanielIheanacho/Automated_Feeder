@@ -2,7 +2,7 @@
 "use client";
 
 import type { ScheduleEntry, LogEntry, FeedingFrequency } from "@/lib/types";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { ScheduleForm } from "./schedule-form";
 import { ScheduleList } from "./schedule-list";
 import { useToast } from "@/hooks/use-toast";
@@ -35,19 +35,19 @@ export function ScheduleManager() {
     return key.replace(/[.#$[\]]/g, '_');
   };
 
-  const getScheduleStorageKey = (): string | null => {
+  const getScheduleStorageKey = useCallback((): string | null => {
     if (auth.user?.email) {
       return `${SCHEDULE_STORAGE_KEY_PREFIX}${sanitizeFirebaseKey(auth.user.email)}`;
     }
     return null;
-  };
+  }, [auth.user?.email]);
 
-  const getClientLogStorageKey = (): string | null => {
+  const getClientLogStorageKey = useCallback((): string | null => {
     if (auth.user?.email) {
       return `${LOG_STORAGE_KEY_PREFIX}${sanitizeFirebaseKey(auth.user.email)}`;
     }
     return null;
-  };
+  }, [auth.user?.email]);
 
   useEffect(() => {
     if (!auth.user?.email) {
@@ -65,7 +65,11 @@ export function ScheduleManager() {
             'id' in parsedSchedule && parsedSchedule.id === auth.user.email &&
             'time' in parsedSchedule && 'frequency' in parsedSchedule &&
             'amount' in parsedSchedule && 'enabled' in parsedSchedule) {
-          setCurrentSchedule(parsedSchedule as ScheduleEntry);
+          // intervalChoice is optional, so handle its absence
+          setCurrentSchedule({
+            ...parsedSchedule,
+            intervalChoice: parsedSchedule.intervalChoice || "auto",
+          } as ScheduleEntry);
         } else {
           if (parsedSchedule && parsedSchedule.id !== auth.user.email) {
             console.warn(`ScheduleManager: Schedule found in localStorage for ${parsedSchedule.id} but current user is ${auth.user.email}. Clearing.`);
@@ -81,8 +85,7 @@ export function ScheduleManager() {
     } else {
       setCurrentSchedule(null);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auth.user?.email]);
+  }, [auth.user?.email, getScheduleStorageKey]);
 
   useEffect(() => {
     if (!auth.user?.email) return;
@@ -94,8 +97,7 @@ export function ScheduleManager() {
     } else if (!currentSchedule) {
       localStorage.removeItem(storageKey);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSchedule, auth.user?.email]);
+  }, [currentSchedule, auth.user?.email, getScheduleStorageKey]);
 
   const addLogEntry = (logEntryData: Omit<LogEntry, 'id' | 'timestamp'>): void => {
     if (!auth.user?.email) return;
@@ -130,7 +132,8 @@ export function ScheduleManager() {
   const calculateDetailedFeedings = (
     firstMealTime: string, // "HH:MM"
     totalDailyAmountStr: string, // "15g"
-    frequency: FeedingFrequency
+    frequency: FeedingFrequency,
+    intervalChoice?: string // "auto", "4", "6", etc.
   ): CalculatedFeeding[] => {
     const [h, m] = firstMealTime.split(':').map(Number);
     const firstMealDate = new Date();
@@ -143,19 +146,27 @@ export function ScheduleManager() {
     if (frequency === "Twice a day") numFeedings = 2;
     else if (frequency === "Thrice a day") numFeedings = 3;
 
+    if (numFeedings === 0) return [];
+    
     const amountPerFeedingVal = totalAmountNumeric / numFeedings;
-    // Format to ensure at least one decimal place, and up to two if needed.
     const amountPerFeedingStr = `${parseFloat(amountPerFeedingVal.toFixed(2))}g`;
 
-
     const feedings: CalculatedFeeding[] = [];
-    if (numFeedings === 0) return [];
-    const intervalHours = 24 / numFeedings;
+    
+    let intervalHoursNum: number;
+    const chosenInterval = (intervalChoice && intervalChoice !== "auto") ? parseInt(intervalChoice, 10) : NaN;
+
+    if (!isNaN(chosenInterval) && numFeedings > 1) {
+        intervalHoursNum = chosenInterval;
+    } else { // "auto" or invalid choice, or "Once a day"
+        intervalHoursNum = 24 / numFeedings;
+    }
+
 
     for (let i = 0; i < numFeedings; i++) {
       const currentMealDate = new Date(firstMealDate.getTime());
-      if (i > 0) { // Add interval for subsequent meals
-          currentMealDate.setHours(currentMealDate.getHours() + i * intervalHours);
+      if (i > 0) {
+        currentMealDate.setHours(currentMealDate.getHours() + i * intervalHoursNum);
       }
       
       const hh = String(currentMealDate.getHours()).padStart(2, '0');
@@ -197,11 +208,14 @@ export function ScheduleManager() {
     const isUpdating = !!currentSchedule && currentSchedule.id === auth.user.email;
     const newEnabledState = scheduleData.enabled !== undefined
       ? scheduleData.enabled
-      : (isUpdating ? currentSchedule!.enabled : true); // Default to enabled for new schedules
+      : (isUpdating ? currentSchedule!.enabled : true); 
 
     const newScheduleBasis: ScheduleEntry = {
-      ...scheduleData,
       id: auth.user.email,
+      time: scheduleData.time,
+      frequency: scheduleData.frequency,
+      amount: scheduleData.amount,
+      intervalChoice: scheduleData.intervalChoice || "auto",
       enabled: newEnabledState,
     };
 
@@ -213,25 +227,20 @@ export function ScheduleManager() {
     });
     toast({
       title: isUpdating ? "Schedule Updated Locally" : "Schedule Set Locally",
-      description: `Config for ${newScheduleBasis.time} (first meal), total ${newScheduleBasis.amount}/day, freq: ${newScheduleBasis.frequency}. Publishing...`,
+      description: `Config for ${newScheduleBasis.time} (first meal), total ${newScheduleBasis.amount}/day, freq: ${newScheduleBasis.frequency}, interval: ${newScheduleBasis.intervalChoice}. Publishing...`,
     });
 
-    const detailedFeedings = calculateDetailedFeedings(newScheduleBasis.time, newScheduleBasis.amount, newScheduleBasis.frequency);
+    const detailedFeedings = calculateDetailedFeedings(newScheduleBasis.time, newScheduleBasis.amount, newScheduleBasis.frequency, newScheduleBasis.intervalChoice);
     const detailedConfigString = formatDetailedScheduleToString(detailedFeedings);
 
     let allPublishedSuccessfully = true;
     const publishedEnabled = await publishToMqtt(TOPIC_ENABLED, String(newScheduleBasis.enabled));
     if (!publishedEnabled) allPublishedSuccessfully = false;
 
-    // Only publish detailed config if the schedule is enabled
     if (newScheduleBasis.enabled) {
       const publishedDetailedConfig = await publishToMqtt(TOPIC_DETAILED_CONFIG, detailedConfigString);
       if (!publishedDetailedConfig) allPublishedSuccessfully = false;
     } else {
-      // If schedule is being set to disabled, we might want to publish an empty detailed config or specific "disabled" signal
-      // For now, let's assume not publishing detailed_config when enabled is false is sufficient if device checks enabled status first.
-      // Alternatively, publish an empty string or a special marker if the device expects something on TOPIC_DETAILED_CONFIG.
-      // Let's publish an empty string to clear any previous detailed config on the device if it's disabled.
       const publishedEmptyDetailedConfig = await publishToMqtt(TOPIC_DETAILED_CONFIG, "");
        if (!publishedEmptyDetailedConfig) allPublishedSuccessfully = false;
        console.log("ScheduleManager: Schedule is disabled, published empty string to TOPIC_DETAILED_CONFIG.");
@@ -242,7 +251,7 @@ export function ScheduleManager() {
       status: 'Device Sync: Config Sent',
       scheduleDetails: { ...newScheduleBasis },
       deviceId: sanitizedUserEmail,
-      notes: `Enabled: ${newScheduleBasis.enabled}. Detailed: ${newScheduleBasis.enabled ? detailedConfigString : '(not sent as schedule is disabled, empty string sent)'}. Pub Success: ${allPublishedSuccessfully}.`
+      notes: `Enabled: ${newScheduleBasis.enabled}. Detailed: ${newScheduleBasis.enabled ? detailedConfigString : '(empty string sent)'}. Interval: ${newScheduleBasis.intervalChoice}. Pub Success: ${allPublishedSuccessfully}.`
     });
 
     if (allPublishedSuccessfully) {
@@ -274,7 +283,7 @@ export function ScheduleManager() {
       description: `Publishing 'enabled' state (${updatedSchedule.enabled}) and detailed config via MQTT...`
     });
 
-    const detailedFeedings = calculateDetailedFeedings(updatedSchedule.time, updatedSchedule.amount, updatedSchedule.frequency);
+    const detailedFeedings = calculateDetailedFeedings(updatedSchedule.time, updatedSchedule.amount, updatedSchedule.frequency, updatedSchedule.intervalChoice);
     const detailedConfigString = formatDetailedScheduleToString(detailedFeedings);
 
     let allPublishedSuccessfully = true;
@@ -285,7 +294,6 @@ export function ScheduleManager() {
         const publishedDetailedConfig = await publishToMqtt(TOPIC_DETAILED_CONFIG, detailedConfigString);
         if (!publishedDetailedConfig) allPublishedSuccessfully = false;
     } else {
-        // Publish empty string to detailed config topic if schedule is disabled
         const publishedEmptyDetailedConfig = await publishToMqtt(TOPIC_DETAILED_CONFIG, "");
         if (!publishedEmptyDetailedConfig) allPublishedSuccessfully = false;
         console.log("ScheduleManager: Schedule toggled to disabled, published empty string to TOPIC_DETAILED_CONFIG.");
@@ -296,7 +304,7 @@ export function ScheduleManager() {
       status: 'Device Sync: Config Sent',
       scheduleDetails: { ...updatedSchedule },
       deviceId: sanitizedUserEmail,
-      notes: `Toggled Enabled: ${updatedSchedule.enabled}. Detailed: ${updatedSchedule.enabled ? detailedConfigString : '(not sent as schedule is disabled, empty string sent)'}. Pub Success: ${allPublishedSuccessfully}.`
+      notes: `Toggled Enabled: ${updatedSchedule.enabled}. Detailed: ${updatedSchedule.enabled ? detailedConfigString : '(empty string sent)'}. Interval: ${updatedSchedule.intervalChoice}. Pub Success: ${allPublishedSuccessfully}.`
     });
 
     if (allPublishedSuccessfully) {
@@ -325,18 +333,18 @@ export function ScheduleManager() {
     const publishedEmptyDetailedConfig = await publishToMqtt(TOPIC_DETAILED_CONFIG, "");
     if (!publishedEmptyDetailedConfig) allPublishedSuccessfully = false;
 
-
-    setCurrentSchedule(null); // Clear local schedule first
+    const clearedScheduleDetails = { ...scheduleBeingCleared };
+    setCurrentSchedule(null); 
     addLogEntry({
       status: "Schedule Cleared",
-      scheduleDetails: { ...scheduleBeingCleared },
+      scheduleDetails: { ...clearedScheduleDetails },
       deviceId: sanitizedUserEmail,
     });
-     addLogEntry({ // Log the sync attempt after local clear
+     addLogEntry({ 
       status: 'Device Sync: Config Sent',
-      scheduleDetails: { ...scheduleBeingCleared, enabled: false },
+      scheduleDetails: { ...clearedScheduleDetails, enabled: false }, // Log as if enabled:false was the state sent
       deviceId: sanitizedUserEmail,
-      notes: `Cleared schedule. Sent Enabled: false. Sent Detailed: (empty string). Pub Success: ${allPublishedSuccessfully}.`
+      notes: `Cleared schedule. Sent Enabled: false. Sent Detailed: (empty string). Interval: ${clearedScheduleDetails.intervalChoice}. Pub Success: ${allPublishedSuccessfully}.`
     });
 
 

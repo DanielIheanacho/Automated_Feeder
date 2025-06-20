@@ -5,7 +5,7 @@ import type { ScheduleEntry } from "@/lib/types";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Clock3, Repeat, CheckCircle, XCircle, Package } from "lucide-react";
+import { Clock3, Repeat, CheckCircle, XCircle, Package, Hourglass } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 interface ScheduleListProps {
@@ -26,6 +26,16 @@ export function ScheduleList({ currentSchedule, onToggleSchedule }: ScheduleList
     );
   }
 
+  const getIntervalDisplayText = (intervalChoice?: string, frequency?: string) => {
+    if (!intervalChoice || intervalChoice === "auto") {
+      if (frequency === "Twice a day") return "Auto (12h)";
+      if (frequency === "Thrice a day") return "Auto (8h)";
+      return "Auto (Evenly Split)";
+    }
+    if (frequency === "Once a day") return "N/A";
+    return `${intervalChoice} hours`;
+  };
+
   return (
     <Card className="shadow-md">
       <CardHeader>
@@ -42,8 +52,9 @@ export function ScheduleList({ currentSchedule, onToggleSchedule }: ScheduleList
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[150px]"><Clock3 className="inline h-4 w-4 mr-1"/>Time for first meal</TableHead>
+                <TableHead className="w-[150px]"><Clock3 className="inline h-4 w-4 mr-1"/>First Meal</TableHead>
                 <TableHead><Repeat className="inline h-4 w-4 mr-1"/>Frequency</TableHead>
+                <TableHead><Hourglass className="inline h-4 w-4 mr-1"/>Interval</TableHead>
                 <TableHead><Package className="inline h-4 w-4 mr-1"/>Total Daily Amount</TableHead>
                 <TableHead className="text-center">Enabled</TableHead>
               </TableRow>
@@ -53,6 +64,11 @@ export function ScheduleList({ currentSchedule, onToggleSchedule }: ScheduleList
                 <TableCell className="font-medium">{currentSchedule.time}</TableCell>
                 <TableCell>
                   <Badge variant="secondary" className="text-xs">{currentSchedule.frequency}</Badge>
+                </TableCell>
+                <TableCell>
+                  <Badge variant="outline" className="text-xs">
+                    {getIntervalDisplayText(currentSchedule.intervalChoice, currentSchedule.frequency)}
+                  </Badge>
                 </TableCell>
                 <TableCell>{currentSchedule.amount}</TableCell>
                 <TableCell className="text-center">

@@ -6,6 +6,7 @@ export interface ScheduleEntry {
   time: string; // e.g., "10:00" - Represents the time for the FIRST meal
   frequency: FeedingFrequency;
   amount: string; // e.g., "15g" - Represents the TOTAL DAILY food amount
+  intervalChoice?: string; // e.g., "auto", "4", "6" (hours)
   enabled: boolean;
 }
 
@@ -29,6 +30,7 @@ export interface LogEntry {
     time: string; // First meal time
     frequency: FeedingFrequency;
     amount: string; // Total daily amount
+    intervalChoice?: string;
     enabled: boolean;
   };
   deviceId?: string;
