@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -18,9 +18,14 @@ export default function SignUpPage() {
   const { signup, isAuthenticated } = useAuth();
   const router = useRouter();
 
+  useEffect(() => {
+    if (isAuthenticated) {
+      router.push('/'); // Redirect if already authenticated
+    }
+  }, [isAuthenticated, router]);
+
   if (isAuthenticated) {
-    router.push('/'); // Redirect if already authenticated
-    return null;
+    return null; // Return null while redirecting or if already authenticated
   }
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -31,7 +36,7 @@ export default function SignUpPage() {
     }
     // In a real app, you'd send this to a backend for user creation
     signup(email);
-    router.push('/'); // Redirect to homepage after signup
+    // router.push('/'); // No longer needed here, useEffect will handle it
   };
 
   return (
